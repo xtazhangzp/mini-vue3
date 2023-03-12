@@ -9,11 +9,16 @@
  *  5.提供stop方法，调用时停止传入runner的执行
  */
 
+import { extend } from "../shared";
+
 // 通过对象形式创建
 class ReactiveEffect {
   private _fn: any;
+  public;
+  active = true;
   deps = [];
-  constructor(fn) {
+  onStop?: () => void;
+  constructor(fn, public scheduler?) {
     this._fn = fn;
   }
   run() {
@@ -21,10 +26,20 @@ class ReactiveEffect {
     return this._fn();
   }
   stop() {
-    this.deps.forEach((dep: any) => {
-      dep.delete(this);
-    });
+    if (this.active) {
+      cleanupEffect(this);
+      if (this.onStop) {
+        this.onStop();
+      }
+      this.active = false;
+    }
   }
+}
+
+function cleanupEffect(effect) {
+  effect.deps.forEach((dep: any) => {
+    dep.delete(effect);
+  });
 }
 
 let targetMaps = new Map();
@@ -47,6 +62,7 @@ export function track(target, key) {
     dep = new Set();
     depMaps.set(key, dep);
   }
+  if (!activeEffect) return;
   dep.add(activeEffect);
   // 为了在执行 stop 方法时可以取到当前 effect 所有的 dep
   activeEffect.deps.push(dep);
@@ -61,16 +77,22 @@ export function trigger(target, key) {
   // 根据 target 获取到depMaps
   let depMaps = targetMaps.get(target);
   // 根据 key 获取到 deps
-  let deps = depMaps.get(key);
+  let dep = depMaps.get(key);
   // 循环 deps 执行每一个 fn => run
-  for (const dep of deps) {
-    dep.run();
+  for (const effect of dep) {
+    if (effect.scheduler) {
+      effect.scheduler();
+    } else {
+      effect.run();
+    }
   }
 }
 
 let activeEffect;
-export function effect(fn) {
-  const _effect = new ReactiveEffect(fn);
+export function effect(fn, options: any = {}) {
+  const _effect = new ReactiveEffect(fn, options.scheduler);
+  extend(_effect, options);
+  // 开始就会执行一次
   _effect.run();
   const runner: any = _effect.run.bind(_effect);
   // runner 挂载 effect 实例
